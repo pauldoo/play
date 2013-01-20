@@ -1,11 +1,16 @@
 @(title: String)(content : Html)
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
 <title>@title</title>
 <link rel="stylesheet" type="text/css" href="@routes.Assets.at("stylesheets/bootstrap.css")"/>
 </head>
 <body>
+@analytics()
+<div class="row"><div class="offset3">@advert()</div></div>
+
 @content
+
 
 <div class='navbar navbar-fixed-bottom'>
 A thing by: <a href="http://twitter.com/pauldoo">@@pauldoo</a>
