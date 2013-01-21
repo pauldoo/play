@@ -6,7 +6,7 @@
 GET     /                           controllers.Application.index
 
 GET     /blip-mosaic          controllers.BlipMosaic.index
-GET     /blip-mosaic/:user   controllers.BlipMosaic.generate(user :String)    
+GET     /blip-mosaic/:searchQuery/:targetEntryId   controllers.BlipMosaic.generate(searchQuery :String, targetEntryId :String)    
 
 # Map static resources from the /public folder to the /assets URL path
 GET     /assets/*file               controllers.Assets.at(path="/public", file)

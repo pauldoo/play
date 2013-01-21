@@ -1,4 +1,7 @@
 @()
+@import play.api.Play.current
+
+@if(play.api.Play.application.mode == play.api.Mode.Prod) { 
 <script type="text/javascript">
 
   var _gaq = _gaq || [];
@@ -13,3 +16,4 @@
   })();
 
 </script>
+}

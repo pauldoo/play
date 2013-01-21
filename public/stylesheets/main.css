@@ -1,0 +1,11 @@
+table.nopadding {
+	border-collapse: collapse;
+}
+
+td.nopadding {
+	padding: 0;
+}
+
+td.nopadding img {
+	display:block;
+}

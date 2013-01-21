@@ -1,0 +1,14 @@
+@(chosenThumbnails: Seq[Seq[String]], tileSize: Int)
+
+@views.html.Application.main("Blip Mosaic") {
+
+<table class='nopadding'>
+@chosenThumbnails.map { row =>
+	<tr>
+		@row.map { cell =>
+			<td class='nopadding'><img src='@cell' width='@tileSize' heght='@tileSize'/></td>
+		}
+	</tr>
+}
+</table>
+}
