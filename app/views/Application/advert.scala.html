@@ -1,7 +1,12 @@
 @()
 @import play.api.Play.current
 
-@if(play.api.Play.application.mode == play.api.Mode.Prod) { 
+@if(play.api.Play.application.mode == play.api.Mode.Prod) {
+<div>
+	<div>
+		<em>Advertisement, for the monies!</em>
+	</div>
+	<div>
 <script type="text/javascript"><!--
 google_ad_client = "ca-pub-9295939534063943";
 /* play */
@@ -13,4 +18,6 @@ google_ad_height = 90;
 <script type="text/javascript"
 src="http://pagead2.googlesyndication.com/pagead/show_ads.js">
 </script>
+	</div>
+</div>
 }
