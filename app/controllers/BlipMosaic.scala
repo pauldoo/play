@@ -17,12 +17,15 @@ import play.api.Logger
 import java.io.ByteArrayInputStream
 import java.io.FileOutputStream
 import play.libs.Akka.asPromise
+import play.api.Play
 
 object BlipMosaic extends Controller {
   val featureWidth = 3;
   val featureHeight = 3;
-    val tileSize = 16;
+  val tileSize = 16;
 
+  
+  
   def index = Action {
     Ok("BOOYA")
   }
@@ -35,11 +38,13 @@ object BlipMosaic extends Controller {
   }
 
   def generate(searchQuery: String, targetEntryId: String) = Action {
+    val apiKey :String = Play.current.configuration.getString("blipfoto.apikey").get;
+    
     Async {
 
       val baseUrl: String = "http://api.blipfoto.com/get/search/";
       val searchPromise: Promise[Response] = WS.url(baseUrl).withQueryString(
-        ("api_key", "617a7d96081cde9e7207509a96b516a0"),
+        ("api_key", apiKey),
         ("version", "2"),
         ("format", "XML"),
         ("query", searchQuery),
@@ -61,7 +66,7 @@ object BlipMosaic extends Controller {
 
       val entryDetailsUrl: String = "http://api.blipfoto.com/get/entry/";
       val targetImage: Promise[BufferedImage] = WS.url(entryDetailsUrl).withQueryString(
-        ("api_key", "617a7d96081cde9e7207509a96b516a0"),
+        ("api_key", apiKey),
         ("version", "2"),
         ("format", "XML"),
         ("entry_id", targetEntryId),
