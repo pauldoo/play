@@ -31,7 +31,7 @@ object BlipMosaic extends Controller {
   class ThumbnailWithFeatures(
     val entryId: String,
     val thumbnailUrl: String,
-    val features: IndexedSeq[Double]) {
+    val features: Seq[Double]) {
 
   }
 
@@ -114,10 +114,20 @@ object BlipMosaic extends Controller {
     } else {
       val compensatedFeatures: Seq[Double] = (targetFeatures.head zip compensation).map { t => t._1 + t._2 };
       val chosenThumbnail = closestThumbnailTo(compensatedFeatures, thumbnails);
-      val newCompensation = (compensatedFeatures zip chosenThumbnail.features).map { t => t._1 - t._2  }.map{_*0.5};
+      val newCompensation = (compensatedFeatures zip chosenThumbnail.features).map { t => t._1 - t._2 }.map { _ * 0.5 };
 
       chosenThumbnail :: fitTiles(targetFeatures.tail, newCompensation, thumbnails);
     }
+  }
+
+  def rgbToYuv(r: Double, g: Double, b: Double): List[Double] = {
+    val R = r * 255.0;
+    val G = g * 255.0;
+    val B = b * 255.0;
+    val Y = 0.299 * R + 0.587 * G + 0.114 * B;
+    val Cb = -0.1687 * R - 0.3313 * G + 0.5 * B + 128;
+    val Cr = 0.5 * R - 0.4187 * G - 0.0813 * B + 128;
+    List(Y / 255.0, Cb / 255.0, Cr / 255.0)
   }
 
   def mortonOrder[A](elements: IndexedSeq[IndexedSeq[A]], width: Int, height: Int): Seq[A] = {
@@ -143,29 +153,32 @@ object BlipMosaic extends Controller {
     math.sqrt((a zip b).map { t => square(t._1 - t._2) }.reduce(_ + _) / a.length);
   }
 
-  def getThumbnailFeatures(thumbnailUrl: String): Promise[IndexedSeq[Double]] = {
+  def getThumbnailFeatures(thumbnailUrl: String): Promise[Seq[Double]] = {
     val key = thumbnailUrl + ".features";
-    Cache.getOrElse[Promise[IndexedSeq[Double]]](key) {
+    Cache.getOrElse[Promise[Seq[Double]]](key) {
       Logger.info("Calculating features for image: " + thumbnailUrl);
       val imagePromise: Promise[BufferedImage] = getImage(thumbnailUrl);
       imagePromise.map(image => {
         val scaledImage: BufferedImage = toScaledBufferedImage(image, featureWidth, featureHeight);
 
-        val featureValues: IndexedSeq[Double] = extractFeatures(scaledImage);
+        val featureValues: Seq[Double] = extractFeatures(scaledImage);
         Logger.info("Computed feature values: " + featureValues + ", for image: " + thumbnailUrl);
         featureValues;
       });
     }
   }
 
-  def extractFeatures(scaledImage: BufferedImage): IndexedSeq[Double] = {
+  def extractFeatures(scaledImage: BufferedImage): Seq[Double] = {
     assert(scaledImage.getWidth() == featureWidth);
     assert(scaledImage.getHeight() == featureHeight);
-    for {
-      x <- 0 until featureWidth;
-      y <- 0 until featureHeight;
-      c <- 0 until 3
-    } yield ((scaledImage.getRGB(x, y) >> (c * 8)) & (0xFF)) / 255.0;
+    val t: Seq[Int] = for (
+        x <- 0 until featureWidth; 
+        y <- 0 until featureHeight)
+        	yield scaledImage.getRGB(x, y);
+
+    t.flatMap { pixel =>
+      rgbToYuv(((pixel >> 16) & 0xFF) / 255.0, ((pixel >> 8) & 0xFF) / 255.0, ((pixel >> 0) & 0xFF) / 255.0)
+    }
   }
 
   def toScaledBufferedImage(source: Image, width: Int, height: Int): BufferedImage = {
