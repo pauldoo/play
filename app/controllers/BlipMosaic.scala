@@ -101,9 +101,23 @@ object BlipMosaic extends Controller {
       };
 
     val swizzled = mortonOrder(targetFeatures, columns, rows);
-    val mapped = swizzled.map { fragment => closestThumbnailTo(fragment, thumbnails).thumbnailUrl };
+    val zeroFeature = (0 until targetFeatures.head.head.length).map { x => 0.0 };
+    val mapped = fitTiles(swizzled, zeroFeature, thumbnails).map(_.thumbnailUrl);
     val unswizzled = unMortonOrder(mapped, columns, rows);
     unswizzled
+  }
+
+  def fitTiles(targetFeatures: Seq[Seq[Double]], compensation: Seq[Double], thumbnails: Seq[ThumbnailWithFeatures]): List[ThumbnailWithFeatures] = {
+
+    if (targetFeatures.isEmpty) {
+      List.empty
+    } else {
+      val compensatedFeatures: Seq[Double] = (targetFeatures.head zip compensation).map { t => t._1 + t._2 };
+      val chosenThumbnail = closestThumbnailTo(compensatedFeatures, thumbnails);
+      val newCompensation = (compensatedFeatures zip chosenThumbnail.features).map { t => t._1 - t._2  }.map{_*0.5};
+
+      chosenThumbnail :: fitTiles(targetFeatures.tail, newCompensation, thumbnails);
+    }
   }
 
   def mortonOrder[A](elements: IndexedSeq[IndexedSeq[A]], width: Int, height: Int): Seq[A] = {
