@@ -127,7 +127,7 @@ object BlipMosaic extends Controller {
     val Y = 0.299 * R + 0.587 * G + 0.114 * B;
     val Cb = -0.1687 * R - 0.3313 * G + 0.5 * B + 128;
     val Cr = 0.5 * R - 0.4187 * G - 0.0813 * B + 128;
-    List(Y / 255.0, Cb / 255.0, Cr / 255.0)
+    List(Y / 255.0, 0.5 * Cb / 255.0, 0.5 * Cr / 255.0)
   }
 
   def mortonOrder[A](elements: IndexedSeq[IndexedSeq[A]], width: Int, height: Int): Seq[A] = {
