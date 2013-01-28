@@ -24,8 +24,6 @@ object BlipMosaic extends Controller {
   val featureHeight = 3;
   val tileSize = 16;
 
-  
-  
   def index = Action {
     Ok("BOOYA")
   }
@@ -38,8 +36,8 @@ object BlipMosaic extends Controller {
   }
 
   def generate(searchQuery: String, targetEntryId: String) = Action {
-    val apiKey :String = Play.current.configuration.getString("blipfoto.apikey").get;
-    
+    val apiKey: String = Play.current.configuration.getString("blipfoto.apikey").get;
+
     Async {
 
       val baseUrl: String = "http://api.blipfoto.com/get/search/";
@@ -96,25 +94,38 @@ object BlipMosaic extends Controller {
     val rows: Int = target.getHeight() / tileSize;
     val scaledTarget = toScaledBufferedImage(target, columns * featureWidth, rows * featureHeight);
 
-    val targetFeatures: Seq[Seq[Seq[Double]]] =
+    val targetFeatures: IndexedSeq[IndexedSeq[Seq[Double]]] =
       for (r <- 0 until rows)
         yield for (c <- 0 until columns) yield {
         extractFeatures(scaledTarget.getSubimage(c * featureWidth, r * featureHeight, featureWidth, featureHeight));
       };
 
-    targetFeatures.map { _.map { fragment => closestThumbnailTo(fragment, thumbnails).thumbnailUrl } };
+    val swizzled = mortonOrder(targetFeatures, columns, rows);
+    val mapped = swizzled.map { fragment => closestThumbnailTo(fragment, thumbnails).thumbnailUrl };
+    val unswizzled = unMortonOrder(mapped, columns, rows);
+    unswizzled
+  }
+
+  def mortonOrder[A](elements: IndexedSeq[IndexedSeq[A]], width: Int, height: Int): Seq[A] = {
+    val coordinates = for (x <- 0 until width; y <- 0 until height) yield (y, x);
+    coordinates.sortBy { c => swizzle(c._2, c._1) }.map { c => elements(c._1)(c._2) };
+  }
+
+  def unMortonOrder[A](elements: Seq[A], width: Int, height: Int): Seq[Seq[A]] = {
+    val coordinates = for (x <- 0 until width; y <- 0 until height) yield (y, x);
+    val k = coordinates.sortBy { c => swizzle(c._2, c._1) } zip elements;
+    k.sortBy { e => e._1 }.map { _._2 }.grouped(width).toSeq
   }
 
   def closestThumbnailTo(
     targetFragment: Seq[Double],
-    thumbnails: Seq[ThumbnailWithFeatures]
-    ): ThumbnailWithFeatures = {
-    thumbnails.minBy{t => rmsDifference(t.features, targetFragment)};
+    thumbnails: Seq[ThumbnailWithFeatures]): ThumbnailWithFeatures = {
+    thumbnails.minBy { t => rmsDifference(t.features, targetFragment) };
   }
 
   def rmsDifference(a: Seq[Double], b: Seq[Double]): Double = {
     assert(a.length == b.length);
-    val square : Double => Double = {k=>k*k};
+    val square: Double => Double = { k => k * k };
     math.sqrt((a zip b).map { t => square(t._1 - t._2) }.reduce(_ + _) / a.length);
   }
 
@@ -163,4 +174,17 @@ object BlipMosaic extends Controller {
     }
   }
 
+  def dilate2(n: Int): Int = {
+    var x = n;
+    assert(0 <= n && n < 0x100);
+    x = (x | (x << 8)) & 0x00FF00FF;
+    x = (x | (x << 4)) & 0x0F0F0F0F;
+    x = (x | (x << 2)) & 0x33333333;
+    x = (x | (x << 1)) & 0x55555555;
+    return x;
+  }
+
+  def swizzle(x: Int, y: Int): Int = {
+    dilate2(x) | (dilate2(y) << 1);
+  }
 }
