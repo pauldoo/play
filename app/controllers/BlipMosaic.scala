@@ -22,7 +22,8 @@ import play.api.Play
 object BlipMosaic extends Controller {
   val featureWidth = 3;
   val featureHeight = 3;
-  val tileSize = 16;
+  val tileSize = 12;
+  val ditherStrength = 0.2;
 
   def index = Action {
     Ok("BOOYA")
@@ -47,7 +48,7 @@ object BlipMosaic extends Controller {
         ("format", "XML"),
         ("query", searchQuery),
         ("size", "small"),
-        ("max", "90")).get();
+        ("max", "1000")).get();
 
       val thumbFeatures: Promise[Seq[ThumbnailWithFeatures]] = searchPromise.flatMap { response =>
         val body: Node = response.xml;
@@ -92,6 +93,9 @@ object BlipMosaic extends Controller {
   def chooseThumbnails(thumbnails: Seq[ThumbnailWithFeatures], target: BufferedImage): Seq[Seq[String]] = {
     val columns: Int = target.getWidth() / tileSize;
     val rows: Int = target.getHeight() / tileSize;
+    
+    Logger.info("Found " + thumbnails.size + " thumbnails for fitting.");
+    
     val scaledTarget = toScaledBufferedImage(target, columns * featureWidth, rows * featureHeight);
 
     val targetFeatures: IndexedSeq[IndexedSeq[Seq[Double]]] =
@@ -114,7 +118,7 @@ object BlipMosaic extends Controller {
     } else {
       val compensatedFeatures: Seq[Double] = (targetFeatures.head zip compensation).map { t => t._1 + t._2 };
       val chosenThumbnail = closestThumbnailTo(compensatedFeatures, thumbnails);
-      val newCompensation = (compensatedFeatures zip chosenThumbnail.features).map { t => t._1 - t._2 }.map { _ * 0.5 };
+      val newCompensation = (compensatedFeatures zip chosenThumbnail.features).map { t => t._1 - t._2 }.map { _ * ditherStrength };
 
       chosenThumbnail :: fitTiles(targetFeatures.tail, newCompensation, thumbnails);
     }
@@ -156,13 +160,13 @@ object BlipMosaic extends Controller {
   def getThumbnailFeatures(thumbnailUrl: String): Promise[Seq[Double]] = {
     val key = thumbnailUrl + ".features";
     Cache.getOrElse[Promise[Seq[Double]]](key) {
-      Logger.info("Calculating features for image: " + thumbnailUrl);
+      //Logger.info("Calculating features for image: " + thumbnailUrl);
       val imagePromise: Promise[BufferedImage] = getImage(thumbnailUrl);
       imagePromise.map(image => {
         val scaledImage: BufferedImage = toScaledBufferedImage(image, featureWidth, featureHeight);
 
         val featureValues: Seq[Double] = extractFeatures(scaledImage);
-        Logger.info("Computed feature values: " + featureValues + ", for image: " + thumbnailUrl);
+        //Logger.info("Computed feature values: " + featureValues + ", for image: " + thumbnailUrl);
         featureValues;
       });
     }

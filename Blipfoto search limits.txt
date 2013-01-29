@@ -1,0 +1,13 @@
+Hi Paul,
+
+Please accept my apologies for the delay in getting back to you. I've
+now increased the allowed value of the "max" parameter in the get/search
+resource to 1000 for your API key; note that this will only work for
+searches in the format "by [username]" such as "by joe" or "by pauldoo";
+if you request this many results for a generic keyword search you'll
+still get an error.
+
+Hope this is all you need!
+
+Kind regards,
+Graham
