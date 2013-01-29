@@ -4,5 +4,7 @@ This file will be packaged with your application, when using `play dist`.
 
 ## TODO
 
-* Landing page
+* Style
 * Use kd-tree or somesuch to optimize tile matching
+* Cache calculated mosaics
+* Cache original jpeg data, not decompressed BufferedImage objects

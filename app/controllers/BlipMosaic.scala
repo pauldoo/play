@@ -25,8 +25,34 @@ object BlipMosaic extends Controller {
   val tileSize = 12;
   val ditherStrength = 0.2;
 
+  private def apiKey(): String = {
+    Play.current.configuration.getString("blipfoto.apikey").get;
+  }
+
   def index = Action {
-    Ok("BOOYA")
+    Ok(views.html.BlipMosaic.index());
+  }
+
+  def start(username: String) = Action {
+    Async {
+      val baseUrl: String = "http://api.blipfoto.com/get/entry/";
+
+      val latestEntryPromise: Promise[Response] = WS.url(baseUrl).withQueryString(
+        ("api_key", apiKey),
+        ("version", "2"),
+        ("format", "XML"),
+        ("display_name", username),
+        ("date", "latest"),
+        ("data", "entry_id")).get();
+
+      latestEntryPromise.map { response =>
+        val body: Node = response.xml;
+        val latestEntryId = (body \\ "entry_id").text;
+        Logger.info("Latest entry for " + username + " is " + latestEntryId);
+
+        Redirect(routes.BlipMosaic.generate("by " + username, latestEntryId));
+      }
+    }
   }
 
   class ThumbnailWithFeatures(
@@ -37,10 +63,7 @@ object BlipMosaic extends Controller {
   }
 
   def generate(searchQuery: String, targetEntryId: String) = Action {
-    val apiKey: String = Play.current.configuration.getString("blipfoto.apikey").get;
-
     Async {
-
       val baseUrl: String = "http://api.blipfoto.com/get/search/";
       val searchPromise: Promise[Response] = WS.url(baseUrl).withQueryString(
         ("api_key", apiKey),
@@ -64,28 +87,33 @@ object BlipMosaic extends Controller {
       }
 
       val entryDetailsUrl: String = "http://api.blipfoto.com/get/entry/";
-      val targetImage: Promise[BufferedImage] = WS.url(entryDetailsUrl).withQueryString(
+      val targetImage: Promise[(BufferedImage, (String, String, String))] = WS.url(entryDetailsUrl).withQueryString(
         ("api_key", apiKey),
         ("version", "2"),
         ("format", "XML"),
         ("entry_id", targetEntryId),
-        ("data", "image,large_image")).get().flatMap { response =>
+        ("data", "image,prev_entry_id,next_entry_id,permalink")).get().flatMap { response =>
           val body: Node = response.xml;
-          val normalUrl = (body \\ "image").text;
-          val largeUrl = (body \\ "large_image").text;
-          val imageUrl: String = if (largeUrl.isEmpty()) normalUrl else largeUrl;
+          val imageUrl = (body \\ "image").text;
+          // TODO: Consider using large images?
+          //val largeUrl = (body \\ "large_image").text;
           Logger.info("Target image #" + targetEntryId + " found: " + imageUrl);
-          getImage(imageUrl);
+
+          val prevEntryId = (body \\ "prev_entry_id").text;
+          val nextEntryId = (body \\ "next_entry_id").text;
+          val permalink = (body \\ "permalink").text;
+          val meta = (permalink, prevEntryId, nextEntryId);
+          getImage(imageUrl).map { image => (image, meta) }
         }
 
-      val result: Promise[Tuple2[Seq[ThumbnailWithFeatures], BufferedImage]] = for {
+      val result: Promise[(Seq[ThumbnailWithFeatures], BufferedImage, (String, String, String))] = for {
         thumbs <- thumbFeatures;
         target <- targetImage
-      } yield (thumbs, target);
+      } yield (thumbs, target._1, target._2);
 
       result.map { tuple =>
         val chosenThumbnails: Seq[Seq[String]] = chooseThumbnails(tuple._1, tuple._2);
-        Ok(views.html.BlipMosaic.tableMosaic(chosenThumbnails, tileSize))
+        Ok(views.html.BlipMosaic.tableMosaic(tuple._3._1, chosenThumbnails, tileSize, tuple._3._2, tuple._3._3))
       }
     }
   }
@@ -93,9 +121,9 @@ object BlipMosaic extends Controller {
   def chooseThumbnails(thumbnails: Seq[ThumbnailWithFeatures], target: BufferedImage): Seq[Seq[String]] = {
     val columns: Int = target.getWidth() / tileSize;
     val rows: Int = target.getHeight() / tileSize;
-    
+
     Logger.info("Found " + thumbnails.size + " thumbnails for fitting.");
-    
+
     val scaledTarget = toScaledBufferedImage(target, columns * featureWidth, rows * featureHeight);
 
     val targetFeatures: IndexedSeq[IndexedSeq[Seq[Double]]] =
@@ -108,6 +136,7 @@ object BlipMosaic extends Controller {
     val zeroFeature = (0 until targetFeatures.head.head.length).map { x => 0.0 };
     val mapped = fitTiles(swizzled, zeroFeature, thumbnails).map(_.thumbnailUrl);
     val unswizzled = unMortonOrder(mapped, columns, rows);
+    Logger.info("Finished fitting.");
     unswizzled
   }
 
@@ -176,9 +205,9 @@ object BlipMosaic extends Controller {
     assert(scaledImage.getWidth() == featureWidth);
     assert(scaledImage.getHeight() == featureHeight);
     val t: Seq[Int] = for (
-        x <- 0 until featureWidth; 
-        y <- 0 until featureHeight)
-        	yield scaledImage.getRGB(x, y);
+      x <- 0 until featureWidth;
+      y <- 0 until featureHeight
+    ) yield scaledImage.getRGB(x, y);
 
     t.flatMap { pixel =>
       rgbToYuv(((pixel >> 16) & 0xFF) / 255.0, ((pixel >> 8) & 0xFF) / 255.0, ((pixel >> 0) & 0xFF) / 255.0)

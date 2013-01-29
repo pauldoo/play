@@ -1,7 +1,10 @@
-@(chosenThumbnails: Seq[Seq[String]], tileSize: Int)
+@(permalink :String, chosenThumbnails: Seq[Seq[String]], tileSize :Int, prevEntryId :String, nextEntryId :String)
 
-@views.html.Application.main("Blip Mosaic") {
+@views.html.Application.common("Blip Mosaic") {
 
+<div><a href='@permalink'>Original.</a></div>
+<div>
+<a href='@prevEntryId'>Previous</a>
 <table class='nopadding'>
 @chosenThumbnails.map { row =>
 	<tr>
@@ -11,4 +14,8 @@
 	</tr>
 }
 </table>
+<a href='@prevEntryId'>Next</a>
+
+</div>
+
 }
