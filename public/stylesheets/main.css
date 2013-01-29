@@ -9,3 +9,7 @@ td.nopadding {
 td.nopadding img {
 	display:block;
 }
+
+div.advert {
+	margin: 7em;
+}
