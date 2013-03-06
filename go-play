@@ -1,0 +1,6 @@
+#!/bin/sh
+
+export PLAY_SECRET="dev-secret"
+export BLIPFOTO_APIKEY="your API key here"
+play
+
