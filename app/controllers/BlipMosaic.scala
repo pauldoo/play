@@ -19,6 +19,8 @@ import java.io.FileOutputStream
 import play.libs.Akka.asPromise
 import play.api.Play
 import utils.KDTree
+import play.api.mvc.SimpleResult
+import play.api.templates.Html
 
 object BlipMosaic extends Controller {
   private val featureWidth = 3;
@@ -64,19 +66,75 @@ object BlipMosaic extends Controller {
     val vector = features;
   }
 
+  private class TargetEntryMetadata(
+    val permalink: String,
+    val prevEntryId: String,
+    val nextEntryId: String) {};
+
   def generate(searchQuery: String, targetEntryId: String) = Action {
     Async {
+      val key = "generate/" + searchQuery + "/" + targetEntryId;
+      val tableAndEntryMetadata = Cache.getOrElse[Promise[Tuple2[Seq[Seq[String]], TargetEntryMetadata]]](key) {
+        val thumbFeatures: Promise[Seq[ThumbnailWithFeatures]] = searchForThumbnails(searchQuery);
+        val targetImage: Promise[Tuple2[TargetEntryMetadata, BufferedImage]] = getTargetImage(targetEntryId);
+
+        for {
+          thumbs <- thumbFeatures;
+          (metadata, image) <- targetImage
+        } yield (chooseThumbnails(thumbs, image), metadata)
+      }
+
+      for {
+        (chosenThumbnails, metadata) <- tableAndEntryMetadata
+      } yield Ok(views.html.BlipMosaic.tableMosaic(
+        metadata.permalink,
+        chosenThumbnails,
+        tileSize,
+        metadata.prevEntryId,
+        metadata.nextEntryId))
+    }
+  }
+
+  private def getTargetImage(targetEntryId: String): Promise[Tuple2[TargetEntryMetadata, BufferedImage]] = {
+    val entryDetailsUrl: String = "http://api.blipfoto.com/get/entry/";
+    WS.url(entryDetailsUrl).withQueryString(
+      ("api_key", apiKey),
+      ("version", "2"),
+      ("format", "XML"),
+      ("entry_id", targetEntryId),
+      ("data", "image,prev_entry_id,next_entry_id,permalink")).get().flatMap { response =>
+        val body: Node = response.xml;
+        val imageUrl = (body \\ "image").text;
+        // TODO: Consider using large images?
+        //val largeUrl = (body \\ "large_image").text;
+        Logger.info("Target image #" + targetEntryId + " found: " + imageUrl);
+
+        val prevEntryId = (body \\ "prev_entry_id").text;
+        val nextEntryId = (body \\ "next_entry_id").text;
+        println(prevEntryId);
+        println(nextEntryId);
+        val permalink = (body \\ "permalink").text;
+        getImage(imageUrl).map { image =>
+          (new TargetEntryMetadata(permalink, prevEntryId, nextEntryId), image)
+        }
+      }
+  }
+
+  private def searchForThumbnails(searchQuery: String): Promise[Seq[ThumbnailWithFeatures]] = {
+    val key = "searchQuery/" + searchQuery;
+    Cache.getOrElse[Promise[Seq[ThumbnailWithFeatures]]](key) {
       val baseUrl: String = "http://api.blipfoto.com/get/search/";
-      val searchPromise: Promise[Response] = WS.url(baseUrl).withQueryString(
+
+      val searchPromise: Promise[Node] = WS.url(baseUrl).withQueryString(
         ("api_key", apiKey),
         ("version", "2"),
         ("format", "XML"),
         ("query", searchQuery),
         ("size", "small"),
-        ("max", "1000")).get();
+        ("max", "1000")).get() map { response => response.xml };
 
-      val thumbFeatures: Promise[Seq[ThumbnailWithFeatures]] = searchPromise.flatMap { response =>
-        val body: Node = response.xml;
+      searchPromise.flatMap { searchResponseBody =>
+        val body: Node = searchResponseBody;
         val thumbnailPromises: Seq[Promise[ThumbnailWithFeatures]] = for {
           item <- (body \\ "item");
           entryId = (item \ "entry_id").text;
@@ -86,36 +144,6 @@ object BlipMosaic extends Controller {
             k => new ThumbnailWithFeatures(entryId, thumbnailUrl, k)
           });
         Promise.sequence(thumbnailPromises);
-      }
-
-      val entryDetailsUrl: String = "http://api.blipfoto.com/get/entry/";
-      val targetImage: Promise[(BufferedImage, (String, String, String))] = WS.url(entryDetailsUrl).withQueryString(
-        ("api_key", apiKey),
-        ("version", "2"),
-        ("format", "XML"),
-        ("entry_id", targetEntryId),
-        ("data", "image,prev_entry_id,next_entry_id,permalink")).get().flatMap { response =>
-          val body: Node = response.xml;
-          val imageUrl = (body \\ "image").text;
-          // TODO: Consider using large images?
-          //val largeUrl = (body \\ "large_image").text;
-          Logger.info("Target image #" + targetEntryId + " found: " + imageUrl);
-
-          val prevEntryId = (body \\ "prev_entry_id").text;
-          val nextEntryId = (body \\ "next_entry_id").text;
-          val permalink = (body \\ "permalink").text;
-          val meta = (permalink, prevEntryId, nextEntryId);
-          getImage(imageUrl).map { image => (image, meta) }
-        }
-
-      val result: Promise[(Seq[ThumbnailWithFeatures], BufferedImage, (String, String, String))] = for {
-        thumbs <- thumbFeatures;
-        target <- targetImage
-      } yield (thumbs, target._1, target._2);
-
-      result.map { tuple =>
-        val chosenThumbnails: Seq[Seq[String]] = chooseThumbnails(tuple._1, tuple._2);
-        Ok(views.html.BlipMosaic.tableMosaic(tuple._3._1, chosenThumbnails, tileSize, tuple._3._2, tuple._3._3))
       }
     }
   }
@@ -193,7 +221,7 @@ object BlipMosaic extends Controller {
   }
 
   private def getThumbnailFeatures(thumbnailUrl: String): Promise[IndexedSeq[Double]] = {
-    val key = thumbnailUrl + ".features";
+    val key = "features/" + thumbnailUrl;
     Cache.getOrElse[Promise[IndexedSeq[Double]]](key) {
       //Logger.info("Calculating features for image: " + thumbnailUrl);
       val imagePromise: Promise[BufferedImage] = getImage(thumbnailUrl);
@@ -236,7 +264,7 @@ object BlipMosaic extends Controller {
   }
 
   private def getImageBytes(imageUrl: String): Promise[Array[Byte]] = {
-    val key = imageUrl + ".image";
+    val key = "imageBytes/" + imageUrl;
     Cache.getOrElse[Promise[Array[Byte]]](key) {
       Logger.info("Downloading image: " + imageUrl);
       WS.url(imageUrl).get().map { resp =>
