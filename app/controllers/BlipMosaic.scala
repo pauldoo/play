@@ -21,10 +21,10 @@ import play.api.Play
 import utils.KDTree
 
 object BlipMosaic extends Controller {
-  val featureWidth = 3;
-  val featureHeight = 3;
-  val tileSize = 12;
-  val ditherStrength = 0.2;
+  private val featureWidth = 3;
+  private val featureHeight = 3;
+  private val tileSize = 12;
+  private val ditherStrength = 0.2;
 
   private def apiKey(): String = {
     Play.current.configuration.getString("blipfoto.apikey").get;
@@ -56,7 +56,7 @@ object BlipMosaic extends Controller {
     }
   }
 
-  class ThumbnailWithFeatures(
+  private class ThumbnailWithFeatures(
     val entryId: String,
     val thumbnailUrl: String,
     val features: IndexedSeq[Double]) extends KDTree.HasVector {
@@ -120,7 +120,7 @@ object BlipMosaic extends Controller {
     }
   }
 
-  def chooseThumbnails(thumbnails: Seq[ThumbnailWithFeatures], target: BufferedImage): Seq[Seq[String]] = {
+  private def chooseThumbnails(thumbnails: Seq[ThumbnailWithFeatures], target: BufferedImage): Seq[Seq[String]] = {
     val columns: Int = target.getWidth() / tileSize;
     val rows: Int = target.getHeight() / tileSize;
 
@@ -148,7 +148,7 @@ object BlipMosaic extends Controller {
     unswizzled
   }
 
-  def fitTiles(
+  private def fitTiles(
     targetFeatures: Seq[IndexedSeq[Double]],
     compensation: Seq[Double],
     thumbnailTree: KDTree[ThumbnailWithFeatures]): List[ThumbnailWithFeatures] = {
@@ -164,7 +164,7 @@ object BlipMosaic extends Controller {
     }
   }
 
-  def rgbToYuv(r: Double, g: Double, b: Double): List[Double] = {
+  private def rgbToYuv(r: Double, g: Double, b: Double): List[Double] = {
     val R = r * 255.0;
     val G = g * 255.0;
     val B = b * 255.0;
@@ -175,24 +175,24 @@ object BlipMosaic extends Controller {
     //List(r, g, b);
   }
 
-  def mortonOrder[A](elements: IndexedSeq[IndexedSeq[A]], width: Int, height: Int): Seq[A] = {
+  private def mortonOrder[A](elements: IndexedSeq[IndexedSeq[A]], width: Int, height: Int): Seq[A] = {
     val coordinates = for (x <- 0 until width; y <- 0 until height) yield (y, x);
     coordinates.sortBy { c => swizzle(c._2, c._1) }.map { c => elements(c._1)(c._2) };
   }
 
-  def unMortonOrder[A](elements: Seq[A], width: Int, height: Int): Seq[Seq[A]] = {
+  private def unMortonOrder[A](elements: Seq[A], width: Int, height: Int): Seq[Seq[A]] = {
     val coordinates = for (x <- 0 until width; y <- 0 until height) yield (y, x);
     val k = coordinates.sortBy { c => swizzle(c._2, c._1) } zip elements;
     k.sortBy { e => e._1 }.map { _._2 }.grouped(width).toSeq
   }
 
-  def closestThumbnailTo(
+  private def closestThumbnailTo(
     targetFragment: IndexedSeq[Double],
     thumbnailTree: KDTree[ThumbnailWithFeatures]): ThumbnailWithFeatures = {
     KDTree.closestPoint(thumbnailTree, targetFragment);
   }
 
-  def getThumbnailFeatures(thumbnailUrl: String): Promise[IndexedSeq[Double]] = {
+  private def getThumbnailFeatures(thumbnailUrl: String): Promise[IndexedSeq[Double]] = {
     val key = thumbnailUrl + ".features";
     Cache.getOrElse[Promise[IndexedSeq[Double]]](key) {
       //Logger.info("Calculating features for image: " + thumbnailUrl);
@@ -207,7 +207,7 @@ object BlipMosaic extends Controller {
     }
   }
 
-  def extractFeatures(scaledImage: BufferedImage): IndexedSeq[Double] = {
+  private def extractFeatures(scaledImage: BufferedImage): IndexedSeq[Double] = {
     assert(scaledImage.getWidth() == featureWidth);
     assert(scaledImage.getHeight() == featureHeight);
     val t: Seq[Int] = for (
@@ -220,7 +220,7 @@ object BlipMosaic extends Controller {
     }.toIndexedSeq
   }
 
-  def toScaledBufferedImage(source: Image, width: Int, height: Int): BufferedImage = {
+  private def toScaledBufferedImage(source: Image, width: Int, height: Int): BufferedImage = {
     val scaled = source.getScaledInstance(width, height, Image.SCALE_SMOOTH);
     val result = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
     val g = result.getGraphics();
@@ -229,18 +229,23 @@ object BlipMosaic extends Controller {
     return result;
   }
 
-  def getImage(imageUrl: String): Promise[BufferedImage] = {
-    // TODO: Should really cache the raw bytes, not the decompressed image
+  private def getImage(imageUrl: String): Promise[BufferedImage] = {
+    getImageBytes(imageUrl) map { bytes =>
+      ImageIO.read(new ByteArrayInputStream(bytes))
+    }
+  }
+
+  private def getImageBytes(imageUrl: String): Promise[Array[Byte]] = {
     val key = imageUrl + ".image";
-    Cache.getOrElse[Promise[BufferedImage]](key) {
+    Cache.getOrElse[Promise[Array[Byte]]](key) {
       Logger.info("Downloading image: " + imageUrl);
-      Akka.future {
-        ImageIO.read(new URL(imageUrl));
+      WS.url(imageUrl).get().map { resp =>
+        resp.ahcResponse.getResponseBodyAsBytes()
       }
     }
   }
 
-  def dilate2(n: Int): Int = {
+  private def dilate2(n: Int): Int = {
     var x = n;
     assert(0 <= n && n < 0x100);
     x = (x | (x << 8)) & 0x00FF00FF;
@@ -250,7 +255,7 @@ object BlipMosaic extends Controller {
     return x;
   }
 
-  def swizzle(x: Int, y: Int): Int = {
+  private def swizzle(x: Int, y: Int): Int = {
     dilate2(x) | (dilate2(y) << 1);
   }
 }
