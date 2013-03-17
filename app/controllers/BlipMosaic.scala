@@ -18,6 +18,7 @@ import java.io.ByteArrayInputStream
 import java.io.FileOutputStream
 import play.libs.Akka.asPromise
 import play.api.Play
+import utils.KDTree
 
 object BlipMosaic extends Controller {
   val featureWidth = 3;
@@ -58,8 +59,9 @@ object BlipMosaic extends Controller {
   class ThumbnailWithFeatures(
     val entryId: String,
     val thumbnailUrl: String,
-    val features: Seq[Double]) {
+    val features: IndexedSeq[Double]) extends KDTree.HasVector {
 
+    val vector = features;
   }
 
   def generate(searchQuery: String, targetEntryId: String) = Action {
@@ -126,30 +128,39 @@ object BlipMosaic extends Controller {
 
     val scaledTarget = toScaledBufferedImage(target, columns * featureWidth, rows * featureHeight);
 
-    val targetFeatures: IndexedSeq[IndexedSeq[Seq[Double]]] =
+    val targetFeatures: IndexedSeq[IndexedSeq[IndexedSeq[Double]]] =
       for (r <- 0 until rows)
         yield for (c <- 0 until columns) yield {
         extractFeatures(scaledTarget.getSubimage(c * featureWidth, r * featureHeight, featureWidth, featureHeight));
       };
 
+    Logger.info("Creating KDTree.");
+    val thumbnailTree: KDTree[ThumbnailWithFeatures] = KDTree.create(thumbnails);
+    Logger.info("KDTree constructed.");
+
     val swizzled = mortonOrder(targetFeatures, columns, rows);
+    Logger.info("Morton order constructed.");
     val zeroFeature = (0 until targetFeatures.head.head.length).map { x => 0.0 };
-    val mapped = fitTiles(swizzled, zeroFeature, thumbnails).map(_.thumbnailUrl);
+    val mapped = fitTiles(swizzled, zeroFeature, thumbnailTree).map(_.thumbnailUrl);
+    Logger.info("Fitted tiles.");
     val unswizzled = unMortonOrder(mapped, columns, rows);
     Logger.info("Finished fitting.");
     unswizzled
   }
 
-  def fitTiles(targetFeatures: Seq[Seq[Double]], compensation: Seq[Double], thumbnails: Seq[ThumbnailWithFeatures]): List[ThumbnailWithFeatures] = {
+  def fitTiles(
+    targetFeatures: Seq[IndexedSeq[Double]],
+    compensation: Seq[Double],
+    thumbnailTree: KDTree[ThumbnailWithFeatures]): List[ThumbnailWithFeatures] = {
 
     if (targetFeatures.isEmpty) {
       List.empty
     } else {
-      val compensatedFeatures: Seq[Double] = (targetFeatures.head zip compensation).map { t => t._1 + t._2 };
-      val chosenThumbnail = closestThumbnailTo(compensatedFeatures, thumbnails);
+      val compensatedFeatures: IndexedSeq[Double] = (targetFeatures.head zip compensation).map { t => t._1 + t._2 };
+      val chosenThumbnail = closestThumbnailTo(compensatedFeatures, thumbnailTree);
       val newCompensation = (compensatedFeatures zip chosenThumbnail.features).map { t => t._1 - t._2 }.map { _ * ditherStrength };
 
-      chosenThumbnail :: fitTiles(targetFeatures.tail, newCompensation, thumbnails);
+      chosenThumbnail :: fitTiles(targetFeatures.tail, newCompensation, thumbnailTree);
     }
   }
 
@@ -157,10 +168,11 @@ object BlipMosaic extends Controller {
     val R = r * 255.0;
     val G = g * 255.0;
     val B = b * 255.0;
-    val Y = 0.299 * R + 0.587 * G + 0.114 * B;
-    val Cb = -0.1687 * R - 0.3313 * G + 0.5 * B + 128;
-    val Cr = 0.5 * R - 0.4187 * G - 0.0813 * B + 128;
-    List(Y / 255.0, 0.5 * Cb / 255.0, 0.5 * Cr / 255.0)
+    val Y = (0.299 * R) + (0.587 * G) + (0.114 * B);
+    val Cb = (-0.1687 * R) + (-0.3313 * G) + (0.5 * B) + 128;
+    val Cr = (0.5 * R) + (-0.4187 * G) + (-0.0813 * B) + 128;
+    List(Y / 255.0, 0.5 * Cb / 255.0, 0.5 * Cr / 255.0);
+    //List(r, g, b);
   }
 
   def mortonOrder[A](elements: IndexedSeq[IndexedSeq[A]], width: Int, height: Int): Seq[A] = {
@@ -175,33 +187,27 @@ object BlipMosaic extends Controller {
   }
 
   def closestThumbnailTo(
-    targetFragment: Seq[Double],
-    thumbnails: Seq[ThumbnailWithFeatures]): ThumbnailWithFeatures = {
-    thumbnails.minBy { t => rmsDifference(t.features, targetFragment) };
+    targetFragment: IndexedSeq[Double],
+    thumbnailTree: KDTree[ThumbnailWithFeatures]): ThumbnailWithFeatures = {
+    KDTree.closestPoint(thumbnailTree, targetFragment);
   }
 
-  def rmsDifference(a: Seq[Double], b: Seq[Double]): Double = {
-    assert(a.length == b.length);
-    val square: Double => Double = { k => k * k };
-    math.sqrt((a zip b).map { t => square(t._1 - t._2) }.reduce(_ + _) / a.length);
-  }
-
-  def getThumbnailFeatures(thumbnailUrl: String): Promise[Seq[Double]] = {
+  def getThumbnailFeatures(thumbnailUrl: String): Promise[IndexedSeq[Double]] = {
     val key = thumbnailUrl + ".features";
-    Cache.getOrElse[Promise[Seq[Double]]](key) {
+    Cache.getOrElse[Promise[IndexedSeq[Double]]](key) {
       //Logger.info("Calculating features for image: " + thumbnailUrl);
       val imagePromise: Promise[BufferedImage] = getImage(thumbnailUrl);
       imagePromise.map(image => {
         val scaledImage: BufferedImage = toScaledBufferedImage(image, featureWidth, featureHeight);
 
-        val featureValues: Seq[Double] = extractFeatures(scaledImage);
+        val featureValues: IndexedSeq[Double] = extractFeatures(scaledImage);
         //Logger.info("Computed feature values: " + featureValues + ", for image: " + thumbnailUrl);
         featureValues;
       });
     }
   }
 
-  def extractFeatures(scaledImage: BufferedImage): Seq[Double] = {
+  def extractFeatures(scaledImage: BufferedImage): IndexedSeq[Double] = {
     assert(scaledImage.getWidth() == featureWidth);
     assert(scaledImage.getHeight() == featureHeight);
     val t: Seq[Int] = for (
@@ -209,9 +215,9 @@ object BlipMosaic extends Controller {
       y <- 0 until featureHeight
     ) yield scaledImage.getRGB(x, y);
 
-    t.flatMap { pixel =>
+    t.flatMap { pixel: Int =>
       rgbToYuv(((pixel >> 16) & 0xFF) / 255.0, ((pixel >> 8) & 0xFF) / 255.0, ((pixel >> 0) & 0xFF) / 255.0)
-    }
+    }.toIndexedSeq
   }
 
   def toScaledBufferedImage(source: Image, width: Int, height: Int): BufferedImage = {
