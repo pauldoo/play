@@ -1,4 +1,4 @@
-@(permalink :String, chosenThumbnails: Seq[Seq[String]], tileSize :Int, prevEntryId :String, nextEntryId :String)
+@(permalink :String, imagePath :Call, imageWidth :Int, imageHeight :Int, prevEntryId :String, nextEntryId :String)
 
 @views.html.Application.common("Blip Mosaic") {
 <div class='container'>
@@ -20,15 +20,7 @@
 
 <div class='row'>
 <div class='span12'>
-<table class='nopadding'>
-@chosenThumbnails.map { row =>
-	<tr>
-		@row.map { cell =>
-			<td class='nopadding'><img src='@cell' width='@tileSize' heght='@tileSize'/></td>
-		}
-	</tr>
-}
-</table>
+<img src="@imagePath" width="@imageWidth" height="@imageHeight" />
 </div>
 </div>
 
