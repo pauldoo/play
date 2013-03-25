@@ -118,7 +118,7 @@ object BlipMosaic extends Controller {
   }
 
   def renderImage(thumbs: Seq[Seq[String]]): Promise[Array[Byte]] = {
-    val width = thumbs.first.length * tileSize;
+    val width = thumbs.head.length * tileSize;
     val height = thumbs.length * tileSize;
 
     Promise.sequence(
@@ -134,8 +134,8 @@ object BlipMosaic extends Controller {
             for {
               (img, idx) <- images.zipWithIndex
             } {
-              val x = idx % thumbs.first.length;
-              val y = idx / thumbs.first.length;
+              val x = idx % thumbs.head.length;
+              val y = idx / thumbs.head.length;
               g.drawImage(img, x * tileSize, y * tileSize, null);
             }
             g.dispose();
