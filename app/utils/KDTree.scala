@@ -47,31 +47,34 @@ object KDTree {
   def closestPoint[A <: HasVector](tree: KDTree[A], point: Vector): A = {
 
     def distanceFn(t: KDTree[A]) = distanceToBounds(point, t);
-    val queue: PriorityQueue[Tuple2[Double, KDTree[A]]] =
-      new PriorityQueue[Tuple2[Double, KDTree[A]]]()(Ordering.by(p => -p._1));
 
-    def wrap(t: KDTree[A]): Tuple2[Double, KDTree[A]] = (-distanceFn(t), t);
-    queue.enqueue(wrap(tree));
+    class TreeWithMinDistance(val tree: KDTree[A]) {
+      val minDistance = distanceFn(tree);
+    }
+    val queue: PriorityQueue[TreeWithMinDistance] =
+      new PriorityQueue[TreeWithMinDistance]()(Ordering.by(p => -p.minDistance));
+
+    def considerEnqueue(t: KDTree[A]) = {
+      if (t != null) {
+        queue.enqueue(new TreeWithMinDistance(t));
+      }
+    }
+    considerEnqueue(tree);
 
     def go(bestResult: Tuple2[A, Double]): A = {
       //print(".");
 
       if (!queue.isEmpty) {
-        val currentItem: Tuple2[Double, KDTree[A]] = queue.dequeue();
+        val currentItem: TreeWithMinDistance = queue.dequeue();
 
-        if (bestResult == null || currentItem._1 < bestResult._2) {
-          val pivotResult: Tuple2[A, Double] = (currentItem._2.pivot, distanceToPoint(point, currentItem._2.pivot.vector));
+        if (bestResult == null || currentItem.minDistance < bestResult._2) {
+          val distanceToPivot = distanceToPoint(point, currentItem.tree.pivot.vector);
 
-          if (currentItem._2.left != null) {
-            queue.enqueue(wrap(currentItem._2.left))
-          }
+          considerEnqueue(currentItem.tree.left);
+          considerEnqueue(currentItem.tree.right);
 
-          if (currentItem._2.right != null) {
-            queue.enqueue(wrap(currentItem._2.right));
-          }
-
-          if (bestResult == null || pivotResult._2 < bestResult._2) {
-            return go(pivotResult);
+          if (bestResult == null || distanceToPivot < bestResult._2) {
+            return go((currentItem.tree.pivot, distanceToPivot));
           } else {
             return go(bestResult);
           }
