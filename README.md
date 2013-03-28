@@ -8,6 +8,7 @@ This file will be packaged with your application, when using `play dist`.
 * Hover over thumbs to see big
 * Toggle blipfoto original
 * Bundle together 'advanced' params in URL
+* Handle transient image download failures more gracefully
 * Respond to adoring fans:
 ** https://twitter.com/Blipfoto/status/296558440183119872
 ** https://twitter.com/delphwynd/status/296559567767224320
