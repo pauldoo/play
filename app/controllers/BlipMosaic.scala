@@ -1,4 +1,5 @@
 package controllers
+
 import play.api.mvc.Action
 import play.api.mvc.Controller
 import play.api.libs.ws.WS
@@ -27,41 +28,63 @@ import javax.imageio.plugins.jpeg.JPEGImageWriteParam
 import javax.imageio.ImageWriteParam
 import javax.imageio.IIOImage
 import javax.imageio.stream.MemoryCacheImageOutputStream
+import models.BlipMosaicForm
+import play.api.data.Forms._
+import play.api.data._
+import models.BlipMosaicForm
+import models.BlipMosaicForm
 
 object BlipMosaic extends Controller {
   private val featureWidth = 3;
   private val featureHeight = 3;
-  private val tileSize = 12;
-  private val ditherStrength = 0.2;
 
   private def apiKey(): String = {
     Play.current.configuration.getString("blipfoto.apikey").get;
   }
 
   def index = Action {
-    Ok(views.html.BlipMosaic.index());
+    Ok(views.html.BlipMosaic.index(startForm.fill(new BlipMosaicForm("", 768, 12, 2))));
   }
 
-  def start(username: String) = Action {
-    Async {
-      val baseUrl: String = "http://api.blipfoto.com/get/entry/";
+  val startForm: Form[BlipMosaicForm] = Form(
+    mapping(
+      "username" -> nonEmptyText,
+      "imageSize" -> number(min = 256, max = 2048),
+      "tileSize" -> number(min = 8, max = 64),
+      "ditherStrength" -> number(min = 0, max = 10) //
+      ) {
+        (username, imageSize, tileSize, ditherStrength) => BlipMosaicForm(username, imageSize, tileSize, ditherStrength)
+      } {
+        (form: BlipMosaicForm) => Some(form.username, form.imageSize, form.tileSize, form.ditherStrength)
+      });
 
-      val latestEntryPromise: Promise[Response] = WS.url(baseUrl).withQueryString(
-        ("api_key", apiKey),
-        ("version", "2"),
-        ("format", "XML"),
-        ("display_name", username),
-        ("date", "latest"),
-        ("data", "entry_id")).get();
+  def start = Action { implicit request =>
+    startForm.bindFromRequest().fold(
+      errors => BadRequest("Boo!"), //BadRequest(html.contact.form(errors)),
+      form => Async {
+        val baseUrl: String = "http://api.blipfoto.com/get/entry/";
 
-      latestEntryPromise.map { response =>
-        val body: Node = response.xml;
-        val latestEntryId = (body \\ "entry_id").text;
-        Logger.info("Latest entry for " + username + " is " + latestEntryId);
+        val latestEntryPromise: Promise[Response] = WS.url(baseUrl).withQueryString(
+          ("api_key", apiKey),
+          ("version", "2"),
+          ("format", "XML"),
+          ("display_name", form.username),
+          ("date", "latest"),
+          ("data", "entry_id")).get();
 
-        Redirect(routes.BlipMosaic.generateHtml("by " + username, latestEntryId));
-      }
-    }
+        latestEntryPromise.map { response =>
+          val body: Node = response.xml;
+          val latestEntryId = (body \\ "entry_id").text;
+          Logger.info("Latest entry for " + form.username + " is " + latestEntryId);
+
+          Redirect(routes.BlipMosaic.generateHtml(
+            form.imageSize,
+            form.tileSize,
+            form.ditherStrength,
+            "by " + form.username,
+            latestEntryId));
+        }
+      })
   }
 
   private class ThumbnailWithFeatures(
@@ -80,44 +103,61 @@ object BlipMosaic extends Controller {
     val prevEntryId: String,
     val nextEntryId: String) {};
 
-  def generateHtml(searchQuery: String, targetEntryId: String) = Action {
+  def generateHtml(imageSize: Int, tileSize: Int, ditherStrength: Int, searchQuery: String, targetEntryId: String) = Action {
     Async {
-      val key = "generateHtml/" + searchQuery + "/" + targetEntryId;
-      val tableAndEntryMetadata = Cache.getOrElse[Promise[TargetEntryMetadata]](key) {
-        getTargetImage(targetEntryId)
-      }
+      val tableAndEntryMetadata = getTargetImageMetadata(targetEntryId);
 
       for {
         metadata <- tableAndEntryMetadata
-      } yield Ok(views.html.BlipMosaic.tableMosaic(
-        metadata.permalink,
-        routes.BlipMosaic.generateImage(searchQuery, targetEntryId),
-        metadata.imageWidth,
-        metadata.imageHeight,
-        metadata.prevEntryId,
-        metadata.nextEntryId))
+      } yield {
+        val (newWidth, newHeight) = resize(metadata.imageWidth, metadata.imageHeight, imageSize);
+
+        Ok(views.html.BlipMosaic.tableMosaic(
+          metadata.permalink,
+          routes.BlipMosaic.generateImage(imageSize, tileSize, ditherStrength, searchQuery, targetEntryId),
+          newWidth,
+          newHeight,
+          metadata.prevEntryId,
+          metadata.nextEntryId))
+      }
     }
   }
 
-  def generateImage(searchQuery: String, targetEntryId: String) = Action {
+  def generateImage(imageSize: Int, tileSize: Int, ditherStrength: Int, searchQuery: String, targetEntryId: String) = Action {
     Async {
-      val key = "generateImage/" + searchQuery + "/" + targetEntryId;
+      val key = "generateImage/" + imageSize + "/" + tileSize + "/" + ditherStrength + "/" + searchQuery + "/" + targetEntryId;
       val imageBytes: Promise[Array[Byte]] = Cache.getOrElse[Promise[Array[Byte]]](key) {
         val thumbsP: Promise[Seq[ThumbnailWithFeatures]] = searchForThumbnails(searchQuery);
-        val metadataP: Promise[TargetEntryMetadata] = getTargetImage(targetEntryId);
-        val imageP: Promise[BufferedImage] = metadataP flatMap { meta => getImage(meta.url) };
+        val imageP: Promise[BufferedImage] =
+          getTargetImageMetadata(targetEntryId) flatMap { meta =>
+            getImage(meta.url) map { image =>
+              {
+                assert(meta.imageWidth == image.getWidth());
+                assert(meta.imageHeight == image.getHeight());
+                val (newWidth, newHeight) = resize(meta.imageWidth, meta.imageHeight, imageSize);
+                toScaledBufferedImage(image, newWidth, newHeight);
+              }
+            }
+          };
+
         for {
           thumbs <- thumbsP;
-          metadata <- metadataP;
           image <- imageP
-        } yield renderImage(chooseThumbnails(thumbs, image)).value.get
+        } yield {
+          renderImage(chooseThumbnails(thumbs, image, tileSize, ditherStrength), tileSize).value.get
+        }
       };
 
       imageBytes.map(bytes => Ok(bytes).as("image/jpeg"));
     }
   }
 
-  def renderImage(thumbs: Seq[Seq[String]]): Promise[Array[Byte]] = {
+  private def resize(width: Int, height: Int, target: Int) = {
+    val max = math.max(width, height);
+    ((width * target) / max, (height * target) / max)
+  }
+
+  def renderImage(thumbs: Seq[Seq[String]], tileSize: Int): Promise[Array[Byte]] = {
     val width = thumbs.head.length * tileSize;
     val height = thumbs.length * tileSize;
 
@@ -125,7 +165,7 @@ object BlipMosaic extends Controller {
       for {
         row <- thumbs;
         thumb <- row
-      } yield scaledBufferedImageOfThumbnail(thumb)) map {
+      } yield scaledBufferedImageOfThumbnail(thumb, tileSize)) map {
         images =>
           {
             val buffer: BufferedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
@@ -156,29 +196,33 @@ object BlipMosaic extends Controller {
 
   }
 
-  private def getTargetImage(targetEntryId: String): Promise[TargetEntryMetadata] = {
-    val entryDetailsUrl: String = "http://api.blipfoto.com/get/entry/";
-    WS.url(entryDetailsUrl).withQueryString(
-      ("api_key", apiKey),
-      ("version", "2"),
-      ("format", "XML"),
-      ("entry_id", targetEntryId),
-      ("data", "image,image_width,image_height,prev_entry_id,next_entry_id,permalink")).get().map { response =>
-        {
-          val body: Node = response.xml;
-          val imageUrl = (body \\ "image").text;
-          Logger.info("Target image #" + targetEntryId + " found: " + imageUrl);
+  private def getTargetImageMetadata(targetEntryId: String): Promise[TargetEntryMetadata] = {
+    val key = "getTargetImageMetadata/" + targetEntryId;
+    Cache.getOrElse[Promise[TargetEntryMetadata]](key) {
 
-          val imageWidth = (body \\ "image_width").text.toInt;
-          val imageHeight = (body \\ "image_height").text.toInt;
-          val prevEntryId = (body \\ "prev_entry_id").text;
-          val nextEntryId = (body \\ "next_entry_id").text;
-          println(prevEntryId);
-          println(nextEntryId);
-          val permalink = (body \\ "permalink").text;
-          new TargetEntryMetadata(imageUrl, permalink, imageWidth, imageHeight, prevEntryId, nextEntryId)
+      val entryDetailsUrl: String = "http://api.blipfoto.com/get/entry/";
+      WS.url(entryDetailsUrl).withQueryString(
+        ("api_key", apiKey),
+        ("version", "2"),
+        ("format", "XML"),
+        ("entry_id", targetEntryId),
+        ("data", "image,image_width,image_height,prev_entry_id,next_entry_id,permalink")).get().map { response =>
+          {
+            val body: Node = response.xml;
+            val imageUrl = (body \\ "image").text;
+            Logger.info("Target image #" + targetEntryId + " found: " + imageUrl);
+
+            val imageWidth = (body \\ "image_width").text.toInt;
+            val imageHeight = (body \\ "image_height").text.toInt;
+            val prevEntryId = (body \\ "prev_entry_id").text;
+            val nextEntryId = (body \\ "next_entry_id").text;
+            println(prevEntryId);
+            println(nextEntryId);
+            val permalink = (body \\ "permalink").text;
+            new TargetEntryMetadata(imageUrl, permalink, imageWidth, imageHeight, prevEntryId, nextEntryId)
+          }
         }
-      }
+    }
   }
 
   private def searchForThumbnails(searchQuery: String): Promise[Seq[ThumbnailWithFeatures]] = {
@@ -209,9 +253,26 @@ object BlipMosaic extends Controller {
     }
   }
 
-  private def chooseThumbnails(thumbnails: Seq[ThumbnailWithFeatures], target: BufferedImage): Seq[Seq[String]] = {
+  private def chooseThumbnails(thumbnails: Seq[ThumbnailWithFeatures], target: BufferedImage, tileSize: Int, ditherStrength: Int): Seq[Seq[String]] = {
     val columns: Int = target.getWidth() / tileSize;
     val rows: Int = target.getHeight() / tileSize;
+
+    val ditherFactor: Double = (ditherStrength / 10.0);
+    def fitTiles(
+      targetFeatures: Seq[IndexedSeq[Double]],
+      compensation: Seq[Double],
+      thumbnailTree: KDTree[ThumbnailWithFeatures]): List[ThumbnailWithFeatures] = {
+
+      if (targetFeatures.isEmpty) {
+        List.empty
+      } else {
+        val compensatedFeatures: IndexedSeq[Double] = (targetFeatures.head zip compensation).map { t => t._1 + t._2 };
+        val chosenThumbnail = closestThumbnailTo(compensatedFeatures, thumbnailTree);
+        val newCompensation = (compensatedFeatures zip chosenThumbnail.features).map { t => t._1 - t._2 }.map { _ * ditherFactor };
+
+        chosenThumbnail :: fitTiles(targetFeatures.tail, newCompensation, thumbnailTree);
+      }
+    }
 
     Logger.info("Found " + thumbnails.size + " thumbnails for fitting.");
 
@@ -235,22 +296,6 @@ object BlipMosaic extends Controller {
     val unswizzled = unMortonOrder(mapped, columns, rows);
     Logger.info("Finished fitting.");
     unswizzled
-  }
-
-  private def fitTiles(
-    targetFeatures: Seq[IndexedSeq[Double]],
-    compensation: Seq[Double],
-    thumbnailTree: KDTree[ThumbnailWithFeatures]): List[ThumbnailWithFeatures] = {
-
-    if (targetFeatures.isEmpty) {
-      List.empty
-    } else {
-      val compensatedFeatures: IndexedSeq[Double] = (targetFeatures.head zip compensation).map { t => t._1 + t._2 };
-      val chosenThumbnail = closestThumbnailTo(compensatedFeatures, thumbnailTree);
-      val newCompensation = (compensatedFeatures zip chosenThumbnail.features).map { t => t._1 - t._2 }.map { _ * ditherStrength };
-
-      chosenThumbnail :: fitTiles(targetFeatures.tail, newCompensation, thumbnailTree);
-    }
   }
 
   private def rgbToYuv(r: Double, g: Double, b: Double): List[Double] = {
@@ -303,8 +348,8 @@ object BlipMosaic extends Controller {
     }.toIndexedSeq
   }
 
-  private def scaledBufferedImageOfThumbnail(thumbnailUrl: String): Promise[BufferedImage] = {
-    val key = "scaledBufferedThumb/" + thumbnailUrl;
+  private def scaledBufferedImageOfThumbnail(thumbnailUrl: String, tileSize: Int): Promise[BufferedImage] = {
+    val key = "scaledBufferedThumb/" + tileSize + "/" + thumbnailUrl;
     return Cache.getOrElse[Promise[BufferedImage]](key) {
       getImage(thumbnailUrl) map { image => toScaledBufferedImage(image, tileSize, tileSize) };
     }
