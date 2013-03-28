@@ -9,6 +9,7 @@ This file will be packaged with your application, when using `play dist`.
 * Toggle blipfoto original
 * Bundle together 'advanced' params in URL
 * Handle transient image download failures more gracefully
+* Make it work with smaller thread stack size (-Xss512k heroku default)
 * Respond to adoring fans:
 ** https://twitter.com/Blipfoto/status/296558440183119872
 ** https://twitter.com/delphwynd/status/296559567767224320
