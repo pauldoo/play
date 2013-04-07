@@ -33,6 +33,7 @@ import play.api.data.Forms._
 import play.api.data._
 import models.BlipMosaicForm
 import models.BlipMosaicForm
+import models.MosaicSettings
 
 object BlipMosaic extends Controller {
   private val featureWidth = 3;
@@ -43,19 +44,16 @@ object BlipMosaic extends Controller {
   }
 
   def index = Action {
-    Ok(views.html.BlipMosaic.index(startForm.fill(new BlipMosaicForm("", 768, 12, 2))));
+    Ok(views.html.BlipMosaic.index(startForm.fill(new BlipMosaicForm(""))));
   }
 
   val startForm: Form[BlipMosaicForm] = Form(
     mapping(
-      "username" -> nonEmptyText,
-      "imageSize" -> number(min = 256, max = 2048),
-      "tileSize" -> number(min = 8, max = 64),
-      "ditherStrength" -> number(min = 0, max = 10) //
+      "username" -> nonEmptyText //
       ) {
-        (username, imageSize, tileSize, ditherStrength) => BlipMosaicForm(username, imageSize, tileSize, ditherStrength)
+        (username) => BlipMosaicForm(username)
       } {
-        (form: BlipMosaicForm) => Some(form.username, form.imageSize, form.tileSize, form.ditherStrength)
+        (form: BlipMosaicForm) => Some(form.username)
       });
 
   def start = Action { implicit request =>
@@ -78,9 +76,9 @@ object BlipMosaic extends Controller {
           Logger.info("Latest entry for " + form.username + " is " + latestEntryId);
 
           Redirect(routes.BlipMosaic.generateHtml(
-            form.imageSize,
-            form.tileSize,
-            form.ditherStrength,
+            MosaicSettings.defaults.imageSize,
+            MosaicSettings.defaults.tileSize,
+            MosaicSettings.defaults.ditherStrength,
             "by " + form.username,
             latestEntryId));
         }
@@ -113,7 +111,10 @@ object BlipMosaic extends Controller {
         val (newWidth, newHeight) = resize(metadata.imageWidth, metadata.imageHeight, imageSize);
 
         Ok(views.html.BlipMosaic.tableMosaic(
+          searchQuery,
+          targetEntryId,
           metadata.permalink,
+          MosaicSettings(imageSize, tileSize, ditherStrength),
           routes.BlipMosaic.generateImage(imageSize, tileSize, ditherStrength, searchQuery, targetEntryId),
           newWidth,
           newHeight,

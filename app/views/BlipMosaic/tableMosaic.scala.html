@@ -1,31 +1,70 @@
-@(permalink :String, imagePath :Call, imageWidth :Int, imageHeight :Int, prevEntryId :String, nextEntryId :String)
+@(searchQuery:String, entryId: String, permalink :String, settings :MosaicSettings , imagePath :Call, imageWidth :Int, imageHeight :Int, prevEntryId :String, nextEntryId :String)
 
 @import helper._
 @import helper.twitterBootstrap._
 
 @views.html.Application.common("Blip Mosaic") {
 <div class='container'>
-<h1><a href="@(routes.BlipMosaic.index)">Blipfoto Mosaic</a></h1>
+	<h1>
+		<a href="@(routes.BlipMosaic.index)">Blipfoto Mosaic</a>
+	</h1>
 
-<div class='row'>
-<div class='offset1 span3'>
-<a href='@prevEntryId' class="btn"><i class='icon-arrow-left'></i> Previous</a>
-</div>
 
-<div class="span4">
-<a href='@permalink' class='btn btn-primary'>Open Original</a>
-</div>
-
-<div class="span3">
-<a href='@nextEntryId' class="btn">Next <i class='icon-arrow-right'></i></a>
-</div>
-</div>
-
-<div class='row'>
-<div class='span12'>
-<img src="@imagePath" width="@imageWidth" height="@imageHeight" />
-</div>
-</div>
+	<div class='row'>
+		<div class='span12'>
+			<div class="btn-toolbar">
+				<div class="btn-group">
+				  <button class="btn"><a href='@prevEntryId'>Previous</a></button>
+				  <button class="btn"><a href='@nextEntryId'>Next</a></button>
+				</div>
+				<div class="btn-group">
+				  <button class="btn"><a href='@permalink'>Open Original</a></button>
+				</div>
+				
+				<div class="btn-group">
+					<button class="btn btn-small">Image Size</button>
+				  	<button class="btn btn-small dropdown-toggle" data-toggle="dropdown">
+				  		@{settings.imageSize}px
+				    	<span class="caret"></span>
+				  	</button>
+				  	<ul class="dropdown-menu">
+@MosaicSettings.imageSizes.map { s =>
+		<li><a href="@(routes.BlipMosaic.generateHtml(s, settings.tileSize, settings.ditherStrength, searchQuery, entryId))">@{s}px</a></li>
+ }
+				  	</ul>				
+			  </div>
+				
+				
+				<div class="btn-group">
+					<button class="btn btn-small">Tile size</button>
+				  	<button class="btn btn-small dropdown-toggle" data-toggle="dropdown">
+				  		@{settings.tileSize}px
+				    	<span class="caret"></span>
+				  	</button>
+				  	<ul class="dropdown-menu">
+@MosaicSettings.tileSizes.map { s =>
+		<li><a href="@(routes.BlipMosaic.generateHtml(settings.imageSize, s, settings.ditherStrength, searchQuery, entryId))">@{s}px</a></li>
+ }
+				  	</ul>				
+			  </div>				
+			  
+				<div class="btn-group">
+					<button class="btn btn-small">Dither strength</button>
+				  	<button class="btn btn-small dropdown-toggle" data-toggle="dropdown">
+						@{settings.ditherStrength}
+				    	<span class="caret"></span>
+				  	</button>
+				  	<ul class="dropdown-menu">
+@MosaicSettings.ditherStrengths.map { s =>
+		<li><a href="@(routes.BlipMosaic.generateHtml(settings.imageSize, settings.tileSize, s, searchQuery, entryId))">@{s}</a></li>
+ }
+				  	</ul>				
+			  </div>							  
+			
+			</div>
+			<img src="@imagePath" width="@imageWidth" height="@imageHeight" />
+		</div>
+	</div>
 
 
 </div>

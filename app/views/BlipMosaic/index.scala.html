@@ -15,27 +15,10 @@
 	mosaicForm("username"), 
 	'_label -> "Blipfoto username", 
 	'_showConstraints -> false)
+</fieldset>
 
-<fieldset>
-<legend>Advanced options</legend>
-@select(
-	mosaicForm("imageSize"),
-	options = options(List("384", "768", "1536")),
-	'_label -> "Mosaic size (in pixels)",
-	'_showConstraints -> false)
-@select(
-	mosaicForm("tileSize"), 
-	options = options(List("12", "24", "48")),
-	'_label -> "Single tile size (in pixels)", 
-	'_showConstraints -> false)
-@select(
-	mosaicForm("ditherStrength"), 
-	options = options(List("0", "2", "4", "6", "8", "10")),
-	'_label -> "Dither strength (how hard to avoid consecutive repeats of a single tile)", 
-	'_showConstraints -> false)
 <button type="submit" class="btn btn-primary">Go</button>
 }
-</fieldset>
 
 </div>
 </div>
